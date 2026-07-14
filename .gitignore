@@ -1,2 +1,3 @@
 # Never commit live credentials.
 .env
+.DS_Store
