@@ -162,7 +162,7 @@ class KafkaRest:
     def get_topic_configs(self, topic: str) -> dict[str, dict]:
         """Return {name: config_entry} for a topic. config_entry has value/is_default/..."""
         out = self._request("GET", f"/topics/{topic}/configs")
-        return {c["name"]: c for c in out.get("data", [])}
+        return {c["name"]: c for c in (out or {}).get("data", [])}
 
     def alter_topic_configs(self, topic: str, values: dict[str, str]) -> None:
         """SET a batch of {name: value} on a topic (POST .../configs:alter)."""
@@ -171,7 +171,7 @@ class KafkaRest:
 
     def get_link_configs(self, link: str) -> dict[str, dict]:
         out = self._request("GET", f"/links/{link}/configs")
-        return {c["name"]: c for c in out.get("data", [])}
+        return {c["name"]: c for c in (out or {}).get("data", [])}
 
     def alter_link_configs(self, link: str, values: dict[str, str]) -> None:
         """SET a batch of {name: value} on a link (PUT .../configs:alter)."""
@@ -192,14 +192,18 @@ class Report:
     # Configs skipped as cluster-local: {topic: {name}}
     skipped: dict[str, set[str]] = field(default_factory=dict)
     # Always/synced configs whose mirror value doesn't match (CL lag or issue).
-    managed_mismatch: dict[str, dict[str, tuple[str, str]]] = field(default_factory=dict)
+    managed_mismatch: dict[str, dict[str, tuple[str, str | None]]] = field(default_factory=dict)
     copy_errors: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 def source_set_configs(entries: dict[str, dict]) -> dict[str, str]:
     """Configs explicitly set on the source (is_default == False)."""
-    return {n: c.get("value") for n, c in entries.items()
-            if not c.get("is_default", False) and c.get("value") is not None}
+    return {
+        n: v
+        for n, c in entries.items()
+        for v in [c.get("value")]
+        if not c.get("is_default", False) and isinstance(v, str)
+    }
 
 
 def reconcile_topic(src: KafkaRest, dst: KafkaRest, source_topic: str, mirror_topic: str,
@@ -271,7 +275,7 @@ def main() -> int:
                    help="[CL_TOPICS] source topics, or 'source=mirror' pairs")
     p.add_argument("--mirror-prefix", default=e("CL_MIRROR_PREFIX", ""),
                    help="[CL_MIRROR_PREFIX] prefix for mirror names if the link uses one")
-    p.add_argument("--skip", nargs="*", default=(e("CL_SKIP").split() if e("CL_SKIP") else None),
+    p.add_argument("--skip", nargs="*", default=(skip_env.split() if (skip_env := e("CL_SKIP")) else None),
                    help="[CL_SKIP] Independent configs to NOT copy (defaults to cluster-local set)")
     p.add_argument("--ca-bundle", default=e("CL_CA_BUNDLE"),
                    help="[CL_CA_BUNDLE] path to a CA bundle (PEM). Auto-detected if omitted.")
